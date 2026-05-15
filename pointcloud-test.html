@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Point Cloud Local Test</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at top, #10273f 0%, #08131f 55%, #02070d 100%);
+      font-family: "Segoe UI", "PingFang SC", sans-serif;
+      color: #d7f3ff;
+    }
+
+    #app {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    #hud {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 10;
+      width: 380px;
+      max-width: calc(100vw - 32px);
+      padding: 14px;
+      background: rgba(7, 17, 29, 0.82);
+      border: 1px solid rgba(108, 207, 255, 0.22);
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+    }
+
+    #title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    #status, #meta, #usage {
+      font-size: 12px;
+      line-height: 1.6;
+      color: #8fbad0;
+    }
+
+    #picker {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .pick-row,
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .pick-row label,
+    .slider-row label {
+      min-width: 90px;
+      color: #b9e7ff;
+      font-size: 12px;
+    }
+
+    .pick-row input[type="file"] {
+      color: #8fbad0;
+      font-size: 12px;
+      max-width: 230px;
+    }
+
+    .slider-row input[type="range"] {
+      width: 150px;
+    }
+
+    .slider-row span {
+      min-width: 44px;
+      font-size: 12px;
+      color: #d7f3ff;
+    }
+
+    #loadBtn {
+      margin-top: 4px;
+      padding: 9px 12px;
+      border: 1px solid rgba(108, 207, 255, 0.24);
+      background: rgba(20, 53, 83, 0.92);
+      color: #d7f3ff;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      text-align: left;
+    }
+
+    #hint {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      z-index: 10;
+      padding: 10px 12px;
+      background: rgba(7, 17, 29, 0.72);
+      border: 1px solid rgba(108, 207, 255, 0.16);
+      border-radius: 10px;
+      font-size: 12px;
+      color: #8fbad0;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="hud">
+      <div id="title">离线点云测试页</div>
+      <div id="status">先用转换脚本生成点云文件，再选择本地文件查看。</div>
+      <div id="meta">这个页面可以直接双击打开，不依赖本地 HTTP 服务。</div>
+      <div id="usage">请选择一对文件：`.points.meta.json` 和 `.points.bin`。</div>
+      <div id="picker">
+        <div class="pick-row">
+          <label>Meta 文件</label>
+          <input id="metaFile" type="file" accept=".json,application/json">
+        </div>
+        <div class="pick-row">
+          <label>Bin 文件</label>
+          <input id="binFile" type="file" accept=".bin,application/octet-stream">
+        </div>
+        <div class="slider-row">
+          <label>点大小</label>
+          <input id="sizeSlider" type="range" min="0.004" max="0.03" step="0.001" value="0.012">
+          <span id="sizeValue">0.012</span>
+        </div>
+        <div class="slider-row">
+          <label>亮度</label>
+          <input id="opacitySlider" type="range" min="0.45" max="1" step="0.01" value="0.98">
+          <span id="opacityValue">0.98</span>
+        </div>
+        <button id="loadBtn" type="button">加载本地点云</button>
+      </div>
+    </div>
+    <div id="hint">拖动旋转 | 滚轮缩放 | 右键平移</div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script>
+    (() => {
+      const statusEl = document.getElementById('status');
+      const metaEl = document.getElementById('meta');
+      const metaFileInput = document.getElementById('metaFile');
+      const binFileInput = document.getElementById('binFile');
+      const loadBtn = document.getElementById('loadBtn');
+      const sizeSlider = document.getElementById('sizeSlider');
+      const opacitySlider = document.getElementById('opacitySlider');
+      const sizeValue = document.getElementById('sizeValue');
+      const opacityValue = document.getElementById('opacityValue');
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.01, 500);
+      camera.position.set(0, 1.2, 8);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.getElementById('app').appendChild(renderer.domElement);
+
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.target.set(0, 0, 0);
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+
+      let cloud = null;
+
+      function disposeCloud() {
+        if (!cloud) return;
+        scene.remove(cloud);
+        if (cloud.geometry) cloud.geometry.dispose();
+        if (cloud.material) cloud.material.dispose();
+        cloud = null;
+      }
+
+      function syncSliderLabels() {
+        sizeValue.textContent = Number(sizeSlider.value).toFixed(3);
+        opacityValue.textContent = Number(opacitySlider.value).toFixed(2);
+        if (cloud && cloud.material) {
+          cloud.material.size = Number(sizeSlider.value);
+          cloud.material.opacity = Number(opacitySlider.value);
+          cloud.material.needsUpdate = true;
+        }
+      }
+
+      function readText(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error || new Error('读取文本文件失败'));
+          reader.readAsText(file, 'utf-8');
+        });
+      }
+
+      function readBuffer(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error || new Error('读取二进制文件失败'));
+          reader.readAsArrayBuffer(file);
+        });
+      }
+
+      function buildColorRamp(y, yMin, yRange) {
+        const bottom = new THREE.Color('#0b3b78');
+        const mid = new THREE.Color('#37b6ff');
+        const top = new THREE.Color('#e4fbff');
+        const t = Math.min(1, Math.max(0, (y - yMin) / yRange));
+        const color = new THREE.Color();
+        if (t < 0.55) color.copy(bottom).lerp(mid, t / 0.55);
+        else color.copy(mid).lerp(top, (t - 0.55) / 0.45);
+        return color;
+      }
+
+      async function loadLocalPointCloud() {
+        const metaFile = metaFileInput.files && metaFileInput.files[0];
+        const binFile = binFileInput.files && binFileInput.files[0];
+
+        if (!metaFile || !binFile) {
+          statusEl.textContent = '请先同时选择 meta 和 bin 文件';
+          return;
+        }
+
+        statusEl.textContent = '正在读取本地点云...';
+        metaEl.textContent = '准备中...';
+
+        try {
+          const meta = JSON.parse(await readText(metaFile));
+          const arrayBuffer = await readBuffer(binFile);
+          const positions = new Float32Array(arrayBuffer);
+          const pointCount = Math.floor(positions.length / 3);
+
+          if (!pointCount) {
+            throw new Error('点云文件为空');
+          }
+
+          const min = meta.bounds && meta.bounds.min ? meta.bounds.min : [0, 0, 0];
+          const max = meta.bounds && meta.bounds.max ? meta.bounds.max : [1, 1, 1];
+          const centerX = (min[0] + max[0]) / 2;
+          const centerY = (min[1] + max[1]) / 2;
+          const centerZ = (min[2] + max[2]) / 2;
+          const yMin = min[1] - centerY;
+          const yRange = (max[1] - min[1]) || 1;
+
+          const centered = new Float32Array(pointCount * 3);
+          const colors = new Float32Array(pointCount * 3);
+
+          for (let i = 0; i < pointCount; i++) {
+            const x = positions[i * 3] - centerX;
+            const y = positions[i * 3 + 1] - centerY;
+            const z = positions[i * 3 + 2] - centerZ;
+
+            centered[i * 3] = x;
+            centered[i * 3 + 1] = y;
+            centered[i * 3 + 2] = z;
+
+            const c = buildColorRamp(y, yMin, yRange);
+            colors[i * 3] = c.r;
+            colors[i * 3 + 1] = c.g;
+            colors[i * 3 + 2] = c.b;
+          }
+
+          const geometry = new THREE.BufferGeometry();
+          geometry.setAttribute('position', new THREE.BufferAttribute(centered, 3));
+          geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+          const material = new THREE.PointsMaterial({
+            size: Number(sizeSlider.value),
+            vertexColors: true,
+            transparent: true,
+            opacity: Number(opacitySlider.value),
+            sizeAttenuation: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+          });
+
+          disposeCloud();
+          cloud = new THREE.Points(geometry, material);
+          scene.add(cloud);
+
+          const maxDim = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]) || 1;
+          cloud.scale.setScalar(5 / maxDim);
+          controls.target.set(0, 0, 0);
+          controls.update();
+
+          statusEl.textContent = '点云加载完成';
+          metaEl.textContent =
+            `点数: ${pointCount.toLocaleString()} | 方法: ${meta.method || 'unknown'} | 包围盒最大边: ${maxDim.toFixed(3)}`;
+        } catch (error) {
+          console.error(error);
+          statusEl.textContent = '点云加载失败';
+          metaEl.textContent = error && error.message ? error.message : String(error);
+        }
+      }
+
+      sizeSlider.addEventListener('input', syncSliderLabels);
+      opacitySlider.addEventListener('input', syncSliderLabels);
+      syncSliderLabels();
+      loadBtn.addEventListener('click', loadLocalPointCloud);
+
+      function animate() {
+        requestAnimationFrame(animate);
+        if (cloud) cloud.rotation.y += 0.0022;
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      animate();
+
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    })();
+  </script>
+</body>
+</html>
