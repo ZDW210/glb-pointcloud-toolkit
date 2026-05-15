@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,7 +11,7 @@
       height: 100%;
       overflow: hidden;
       background: radial-gradient(circle at top, #10273f 0%, #08131f 55%, #02070d 100%);
-      font-family: "Segoe UI", "PingFang SC", sans-serif;
+      font-family: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
       color: #d7f3ff;
     }
 
@@ -26,20 +26,53 @@
       top: 16px;
       left: 16px;
       z-index: 10;
-      width: 380px;
+      width: 410px;
       max-width: calc(100vw - 32px);
       padding: 14px;
-      background: rgba(7, 17, 29, 0.82);
+      background: rgba(7, 17, 29, 0.84);
       border: 1px solid rgba(108, 207, 255, 0.22);
       border-radius: 12px;
       backdrop-filter: blur(10px);
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+      box-sizing: border-box;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
     }
 
     #title {
       font-size: 15px;
       font-weight: 600;
-      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+
+    .lang-switch {
+      display: inline-flex;
+      flex: 0 0 auto;
+      overflow: hidden;
+      border: 1px solid rgba(108, 207, 255, 0.24);
+      border-radius: 8px;
+      background: rgba(11, 31, 49, 0.74);
+    }
+
+    .lang-switch button {
+      min-width: 42px;
+      padding: 5px 8px;
+      border: 0;
+      background: transparent;
+      color: #8fbad0;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .lang-switch button.active {
+      background: rgba(55, 182, 255, 0.22);
+      color: #e4fbff;
     }
 
     #status, #meta, #usage {
@@ -65,7 +98,7 @@
 
     .pick-row label,
     .slider-row label {
-      min-width: 90px;
+      min-width: 92px;
       color: #b9e7ff;
       font-size: 12px;
     }
@@ -73,7 +106,7 @@
     .pick-row input[type="file"] {
       color: #8fbad0;
       font-size: 12px;
-      max-width: 230px;
+      max-width: 250px;
     }
 
     .slider-row input[type="range"] {
@@ -98,6 +131,10 @@
       text-align: left;
     }
 
+    #loadBtn:hover {
+      background: rgba(30, 78, 118, 0.96);
+    }
+
     #hint {
       position: absolute;
       right: 16px;
@@ -109,54 +146,162 @@
       border-radius: 10px;
       font-size: 12px;
       color: #8fbad0;
+      max-width: calc(100vw - 32px);
+      box-sizing: border-box;
     }
   </style>
 </head>
 <body>
   <div id="app">
     <div id="hud">
-      <div id="title">离线点云测试页</div>
-      <div id="status">先用转换脚本生成点云文件，再选择本地文件查看。</div>
-      <div id="meta">这个页面可以直接双击打开，不依赖本地 HTTP 服务。</div>
-      <div id="usage">请选择一对文件：`.points.meta.json` 和 `.points.bin`。</div>
+      <div class="topbar">
+        <div id="title"></div>
+        <div class="lang-switch" aria-label="Language">
+          <button id="langEn" type="button" data-lang="en">EN</button>
+          <button id="langZh" type="button" data-lang="zh">中文</button>
+        </div>
+      </div>
+      <div id="status"></div>
+      <div id="meta"></div>
+      <div id="usage"></div>
       <div id="picker">
         <div class="pick-row">
-          <label>Meta 文件</label>
+          <label id="metaLabel" for="metaFile"></label>
           <input id="metaFile" type="file" accept=".json,application/json">
         </div>
         <div class="pick-row">
-          <label>Bin 文件</label>
+          <label id="binLabel" for="binFile"></label>
           <input id="binFile" type="file" accept=".bin,application/octet-stream">
         </div>
         <div class="slider-row">
-          <label>点大小</label>
+          <label id="sizeLabel" for="sizeSlider"></label>
           <input id="sizeSlider" type="range" min="0.004" max="0.03" step="0.001" value="0.012">
           <span id="sizeValue">0.012</span>
         </div>
         <div class="slider-row">
-          <label>亮度</label>
+          <label id="opacityLabel" for="opacitySlider"></label>
           <input id="opacitySlider" type="range" min="0.45" max="1" step="0.01" value="0.98">
           <span id="opacityValue">0.98</span>
         </div>
-        <button id="loadBtn" type="button">加载本地点云</button>
+        <button id="loadBtn" type="button"></button>
       </div>
     </div>
-    <div id="hint">拖动旋转 | 滚轮缩放 | 右键平移</div>
+    <div id="hint"></div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   <script>
     (() => {
-      const statusEl = document.getElementById('status');
-      const metaEl = document.getElementById('meta');
+      const i18n = {
+        en: {
+          title: 'Offline Point Cloud Test',
+          statusInitial: 'Generate point cloud files with the converter, then select local files here.',
+          metaInitial: 'This page can be opened directly. No local HTTP server is required.',
+          usage: 'Select a matching pair: .points.meta.json and .points.bin.',
+          metaFile: 'Meta file',
+          binFile: 'Bin file',
+          pointSize: 'Point size',
+          opacity: 'Opacity',
+          load: 'Load local point cloud',
+          hint: 'Drag to rotate | Mouse wheel to zoom | Right-click to pan',
+          missingFiles: 'Please select both meta and bin files first.',
+          reading: 'Reading local point cloud...',
+          preparing: 'Preparing...',
+          emptyCloud: 'The point cloud file is empty.',
+          readTextFailed: 'Failed to read text file.',
+          readBinaryFailed: 'Failed to read binary file.',
+          loaded: 'Point cloud loaded.',
+          failed: 'Failed to load point cloud.',
+          points: 'Points',
+          method: 'Method',
+          maxBounds: 'Max bounds edge'
+        },
+        zh: {
+          title: '离线点云测试页',
+          statusInitial: '先使用转换工具生成点云文件，然后在这里选择本地文件查看。',
+          metaInitial: '这个页面可以直接双击打开，不需要本地 HTTP 服务。',
+          usage: '请选择一组匹配文件：.points.meta.json 和 .points.bin。',
+          metaFile: 'Meta 文件',
+          binFile: 'Bin 文件',
+          pointSize: '点大小',
+          opacity: '亮度',
+          load: '加载本地点云',
+          hint: '拖动旋转 | 滚轮缩放 | 右键平移',
+          missingFiles: '请先同时选择 meta 和 bin 文件。',
+          reading: '正在读取本地点云...',
+          preparing: '准备中...',
+          emptyCloud: '点云文件为空。',
+          readTextFailed: '读取文本文件失败。',
+          readBinaryFailed: '读取二进制文件失败。',
+          loaded: '点云加载完成。',
+          failed: '点云加载失败。',
+          points: '点数',
+          method: '方法',
+          maxBounds: '包围盒最大边'
+        }
+      };
+
+      const elements = {
+        title: document.getElementById('title'),
+        status: document.getElementById('status'),
+        meta: document.getElementById('meta'),
+        usage: document.getElementById('usage'),
+        metaLabel: document.getElementById('metaLabel'),
+        binLabel: document.getElementById('binLabel'),
+        sizeLabel: document.getElementById('sizeLabel'),
+        opacityLabel: document.getElementById('opacityLabel'),
+        loadBtn: document.getElementById('loadBtn'),
+        hint: document.getElementById('hint'),
+        langEn: document.getElementById('langEn'),
+        langZh: document.getElementById('langZh')
+      };
+
       const metaFileInput = document.getElementById('metaFile');
       const binFileInput = document.getElementById('binFile');
-      const loadBtn = document.getElementById('loadBtn');
       const sizeSlider = document.getElementById('sizeSlider');
       const opacitySlider = document.getElementById('opacitySlider');
       const sizeValue = document.getElementById('sizeValue');
       const opacityValue = document.getElementById('opacityValue');
+
+      let currentLang = localStorage.getItem('pointcloud-test-lang') || 'en';
+      let cloud = null;
+      let lastMeta = null;
+      let lastPointCount = 0;
+      let lastMaxDim = 0;
+
+      function t(key) {
+        return i18n[currentLang][key] || i18n.en[key] || key;
+      }
+
+      function setLanguage(lang) {
+        currentLang = lang === 'zh' ? 'zh' : 'en';
+        localStorage.setItem('pointcloud-test-lang', currentLang);
+        document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+        document.title = currentLang === 'zh' ? '离线点云测试页' : 'Point Cloud Local Test';
+
+        elements.title.textContent = t('title');
+        elements.usage.textContent = t('usage');
+        elements.metaLabel.textContent = t('metaFile');
+        elements.binLabel.textContent = t('binFile');
+        elements.sizeLabel.textContent = t('pointSize');
+        elements.opacityLabel.textContent = t('opacity');
+        elements.loadBtn.textContent = t('load');
+        elements.hint.textContent = t('hint');
+        elements.langEn.classList.toggle('active', currentLang === 'en');
+        elements.langZh.classList.toggle('active', currentLang === 'zh');
+
+        if (lastMeta) {
+          showLoadedMeta(lastMeta, lastPointCount, lastMaxDim);
+          elements.status.textContent = t('loaded');
+        } else {
+          elements.status.textContent = t('statusInitial');
+          elements.meta.textContent = t('metaInitial');
+        }
+      }
+
+      elements.langEn.addEventListener('click', () => setLanguage('en'));
+      elements.langZh.addEventListener('click', () => setLanguage('zh'));
 
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.01, 500);
@@ -173,8 +318,6 @@
       controls.target.set(0, 0, 0);
 
       scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-
-      let cloud = null;
 
       function disposeCloud() {
         if (!cloud) return;
@@ -198,7 +341,7 @@
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(reader.result);
-          reader.onerror = () => reject(reader.error || new Error('读取文本文件失败'));
+          reader.onerror = () => reject(reader.error || new Error(t('readTextFailed')));
           reader.readAsText(file, 'utf-8');
         });
       }
@@ -207,7 +350,7 @@
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(reader.result);
-          reader.onerror = () => reject(reader.error || new Error('读取二进制文件失败'));
+          reader.onerror = () => reject(reader.error || new Error(t('readBinaryFailed')));
           reader.readAsArrayBuffer(file);
         });
       }
@@ -216,11 +359,16 @@
         const bottom = new THREE.Color('#0b3b78');
         const mid = new THREE.Color('#37b6ff');
         const top = new THREE.Color('#e4fbff');
-        const t = Math.min(1, Math.max(0, (y - yMin) / yRange));
+        const ratio = Math.min(1, Math.max(0, (y - yMin) / yRange));
         const color = new THREE.Color();
-        if (t < 0.55) color.copy(bottom).lerp(mid, t / 0.55);
-        else color.copy(mid).lerp(top, (t - 0.55) / 0.45);
+        if (ratio < 0.55) color.copy(bottom).lerp(mid, ratio / 0.55);
+        else color.copy(mid).lerp(top, (ratio - 0.55) / 0.45);
         return color;
+      }
+
+      function showLoadedMeta(meta, pointCount, maxDim) {
+        elements.meta.textContent =
+          `${t('points')}: ${pointCount.toLocaleString()} | ${t('method')}: ${meta.method || 'unknown'} | ${t('maxBounds')}: ${maxDim.toFixed(3)}`;
       }
 
       async function loadLocalPointCloud() {
@@ -228,12 +376,12 @@
         const binFile = binFileInput.files && binFileInput.files[0];
 
         if (!metaFile || !binFile) {
-          statusEl.textContent = '请先同时选择 meta 和 bin 文件';
+          elements.status.textContent = t('missingFiles');
           return;
         }
 
-        statusEl.textContent = '正在读取本地点云...';
-        metaEl.textContent = '准备中...';
+        elements.status.textContent = t('reading');
+        elements.meta.textContent = t('preparing');
 
         try {
           const meta = JSON.parse(await readText(metaFile));
@@ -242,7 +390,7 @@
           const pointCount = Math.floor(positions.length / 3);
 
           if (!pointCount) {
-            throw new Error('点云文件为空');
+            throw new Error(t('emptyCloud'));
           }
 
           const min = meta.bounds && meta.bounds.min ? meta.bounds.min : [0, 0, 0];
@@ -294,20 +442,22 @@
           controls.target.set(0, 0, 0);
           controls.update();
 
-          statusEl.textContent = '点云加载完成';
-          metaEl.textContent =
-            `点数: ${pointCount.toLocaleString()} | 方法: ${meta.method || 'unknown'} | 包围盒最大边: ${maxDim.toFixed(3)}`;
+          lastMeta = meta;
+          lastPointCount = pointCount;
+          lastMaxDim = maxDim;
+          elements.status.textContent = t('loaded');
+          showLoadedMeta(meta, pointCount, maxDim);
         } catch (error) {
           console.error(error);
-          statusEl.textContent = '点云加载失败';
-          metaEl.textContent = error && error.message ? error.message : String(error);
+          elements.status.textContent = t('failed');
+          elements.meta.textContent = error && error.message ? error.message : String(error);
         }
       }
 
       sizeSlider.addEventListener('input', syncSliderLabels);
       opacitySlider.addEventListener('input', syncSliderLabels);
       syncSliderLabels();
-      loadBtn.addEventListener('click', loadLocalPointCloud);
+      elements.loadBtn.addEventListener('click', loadLocalPointCloud);
 
       function animate() {
         requestAnimationFrame(animate);
@@ -323,6 +473,8 @@
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
+
+      setLanguage(currentLang);
     })();
   </script>
 </body>
